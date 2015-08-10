@@ -1,0 +1,20 @@
+Title
+========
+
+Synopsis 
+==========
+Storm data from the U.S. National Oceanic and Atmospheric Administration's (NOAA) storm database, which tracks characteristics of major storms and weather events from 1950 to November 2011 in the US.  
+Further information on the data can be found in the National Weather Service [Storm Data Documentation](https://d396qusza40orc.cloudfront.net/repdata%2Fpeer2_doc%2Fpd01016005curr.pdf) or the National Climatic Data Centre Storm Events [FAQ](https://d396qusza40orc.cloudfront.net/repdata%2Fpeer2_doc%2FNCDC%20Storm%20Events-FAQ%20Page.pdf) 
+
+Data Processing
+=================
+The data is a comma-separated-value file, compressed via the bzip2 algorithm, the first line as column headers and NA values are coded as blank fields. The read.csv function unzips the file and processes the column headers with its default arguments.  
+
+```{r download, cache=TRUE}
+url = "http://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2"
+download.file(url, "stormData.csv.bz2")
+stormData <- read.csv("stormData.csv.bz2", na.strings = "")
+```
+
+Results
+================
