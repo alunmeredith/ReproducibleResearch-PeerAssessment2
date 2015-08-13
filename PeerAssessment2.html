@@ -76,20 +76,188 @@ library(dplyr)
 library(ggplot2)
 library(tidyr)
 opts_chunk$set(cache=TRUE)</code></pre>
-<p>Downloading and reading the storm data</p>
+<div id="downloading-and-reading-the-storm-data" class="section level4">
+<h4>Downloading and reading the storm data</h4>
 <p>The data is a comma-separated-value file, compressed via the bzip2 algorithm, the first line is column headers and NA values are coded as blank fields. The read.csv function unzips the file and processes the column headers with its default arguments.</p>
 <pre class="r"><code>url = &quot;http://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2&quot;
 download.file(url, &quot;stormData.csv.bz2&quot;)
-stormData &lt;- read.csv(&quot;stormData.csv.bz2&quot;, na.strings = &quot;&quot;)</code></pre>
-<p>We then tidy the dataset, changing the variable names to tidy names (lower case, no non-alphanumeric characters etc.) and change the date variables to Changing date to a POSIXct date object.</p>
-<pre class="r"><code>data &lt;- stormData
-data$BGN_DATE &lt;- as.Date(data$BGN_DATE, format=&quot;%m/%d/%Y %H:%M:%S&quot;)
-data$END_DATE &lt;- as.Date(data$END_DATE, format = &quot;%m/%d/%Y %H:%M:%S&quot;)
-
-data &lt;- mutate(data, year=year(BGN_DATE))
-# Tidying the names, so lower case and no &quot;_/ /.&quot;
-names(data) &lt;- tolower(names(data))
+data &lt;- read.csv(&quot;stormData.csv.bz2&quot;, na.strings = &quot;&quot;)</code></pre>
+<p>We then tidy the dataset, changing the variable names to tidy names (lower case, no non-alphanumeric characters etc.)</p>
+<pre class="r"><code>names(data) &lt;- tolower(names(data))
 names(data) &lt;- gsub(&quot;_&quot;, &quot;x&quot;, names(data))</code></pre>
+</div>
+<div id="tidying-the-date-formats" class="section level4">
+<h4>Tidying the date formats</h4>
+<p>There are two variable bgnxdate and endxdate which refer to the start and end dates of the severe weather event. We convert these variables to POSIXct date object. (thiis is important as some event types are differentiated through the duration of the event). We then add a new variable year, which describes the year the events were recorded in so that we can compare the change in events over time (not including seasonal changes).</p>
+<pre class="r"><code>data$bgnxdate &lt;- as.Date(data$bgnxdate, format=&quot;%m/%d/%Y %H:%M:%S&quot;)
+data$endxdate &lt;- as.Date(data$endxdate, format = &quot;%m/%d/%Y %H:%M:%S&quot;)
+data &lt;- mutate(data, year=year(bgnxdate))</code></pre>
+<p>Events span 50 years. Over this period collection method has changed substantially <a href="https://www.ncdc.noaa.gov/stormevents/details.jsp?type=collection">from the NOAA website:</a> - <strong>1950:1954:</strong> Only Tornados were recorded.<br /> - <strong>1955:1992:</strong> Only tornado, thunderstorm, wind and hail events were keyed from paper publications into digital.<br /> - <strong>1993:1995:</strong> Only tornado, thuderstorm, wind and hail events have been extracted from the unformated text files.<br /> - <strong>1996:2011:</strong> All 48 event types recorded</p>
+<pre class="r"><code>years &lt;- mutate(data, year= year(bgnxdate)) %&gt;%
+  group_by(year) %&gt;%
+  summarise(number=n())
+       
+filter(years, year %in% c(1950,1960, 1970, 1980, 1990, 2000, 2010))</code></pre>
+<pre><code>## Source: local data frame [7 x 2]
+## 
+##   year number
+## 1 1950    223
+## 2 1960   1945
+## 3 1970   3215
+## 4 1980   6146
+## 5 1990  10946
+## 6 2000  34471
+## 7 2010  48161</code></pre>
+<p>Because of the limited types of event collected before 1996 we have decided to only analyse data where all event types were recorded so different event types can be compared directly. As such we will only look at the period 1996:2011, below we subset the data to this period.</p>
+<p>Note: Over time the number and type of recorded events have incresed. This is not limited to the changes in collection methods (not increasing numbers from 1960 - 1990 and is likely due to improvements in collection but also better historical records.</p>
+<pre class="r"><code>data &lt;- filter(data, year &gt;= 1996)</code></pre>
+</div>
+<div id="data-cleaning-event-types-evtype" class="section level4">
+<h4>Data Cleaning: Event types (evtype)</h4>
+<p>Although the <a href="https://d396qusza40orc.cloudfront.net/repdata%2Fpeer2_doc%2Fpd01016005curr.pdf">documenation</a> says there should only be 48 levels to EVTYPE there are in fact 985 in this subset (1996:2011) or the data.</p>
+<pre class="r"><code>length(levels(as.factor(data$evtype)))</code></pre>
+<pre><code>## [1] 985</code></pre>
+<p>We can match the existing data with a list of the allowed event categories listed below:</p>
+<pre class="r"><code>eventNames &lt;- c(&quot;Astronomical Low Tide&quot;, &quot;Avalanche&quot;, &quot;Blizzard&quot;, &quot;Coastal Flood&quot;, &quot;Cold/Wind Chill&quot;, &quot;Debris Flow&quot;, &quot;Dense Fog&quot;, &quot;Dense Smoke&quot;, &quot;Drought&quot;, &quot;Dust Devil&quot;, &quot;Dust Storm&quot;, &quot;Excessive Heat&quot;, &quot;Extreme Cold/Wind Chill&quot;, &quot;Flash Flood&quot;, &quot;Flood&quot;, &quot;Frost/Freeze&quot;, &quot;Funnel Cloud&quot;, &quot;Freezing Fog&quot;, &quot;Hail&quot;, &quot;Heat&quot;, &quot;Heavy Rain&quot;, &quot;Heavy Snow&quot;, &quot;High Surf&quot;, &quot;High Wind&quot;, &quot;Hurricane (Typhoon)&quot;, &quot;Ice Storm&quot;, &quot;Lake-Effect Snow&quot;, &quot;Lakeshore Flood&quot;, &quot;Lightning&quot;, &quot;Marine Hail&quot;, &quot;Marine High Wind&quot;, &quot;Marine Strong Wind&quot;, &quot;Marine Thunderstorm Wind&quot;, &quot;Rip Current&quot;, &quot;Seiche&quot;, &quot;Sleet&quot;, &quot;Storm Surge/Tide&quot;, &quot;Strong Wind&quot;, &quot;Thunderstorm Wind&quot;, &quot;Tornado&quot;, &quot;Tropical Depression&quot;, &quot;Tropical Storm&quot;, &quot;Tsunami&quot;, &quot;Volcanic Ash&quot;, &quot;Waterspout&quot;, &quot;Wildfire&quot;, &quot;Winter Storm&quot;, &quot;Winter Weather&quot;) </code></pre>
+<p>By first normalising all entries to lower case (including our list of allowed factors), we can see the proportion of the data which already matches allowed event names.</p>
+<pre class="r"><code>eventNames &lt;- tolower(eventNames)
+data$evtype &lt;- tolower(data$evtype)
+# logical vector indexing which evtypes match those given in eventNames
+matches &lt;- sapply(data$evtype, function(x) x %in% eventNames)
+# Proportion of events matched to allowed event names. (evtype)
+sum(matches) / nrow(data)</code></pre>
+<pre><code>## [1] 0.7721558</code></pre>
+<pre class="r"><code># subset of data which matches event names</code></pre>
+<p>Looking at the subset of evtype levels which are not matched to the 48 allowed classifications:<br />We can see that “tstm wind” is by far the biggest unmatched evtype and the numbers quickly fall off after the top 6 evtypes. By correctly labelling the top 10 of these evtypes (and some others where obvious patterns occur) we can include the vast majority of mislabelled observations in our analysis.</p>
+<pre class="r"><code>not.matched &lt;- group_by(data[!matches,], evtype) %&gt;%
+                       summarise(number = n()) %&gt;%
+                       arrange(desc(number))
+
+# Proportion of the unmatched evtypes captured by the 10 most common mislabelled evtypes. 
+sum(not.matched[1:10,2]) / sum(not.matched[,2])</code></pre>
+<pre><code>## [1] 0.9668576</code></pre>
+<pre class="r"><code># Top 15 unmatched evtypes. (event types)
+head(not.matched, 15)</code></pre>
+<pre><code>## Source: local data frame [15 x 2]
+## 
+##                  evtype number
+## 1             tstm wind 128664
+## 2      marine tstm wind   6175
+## 3  urban/sml stream fld   3392
+## 4      wild/forest fire   1443
+## 5    winter weather/mix   1104
+## 6        tstm wind/hail   1028
+## 7          extreme cold    617
+## 8             landslide    588
+## 9                   fog    532
+## 10                 snow    425
+## 11                 wind    326
+## 12         rip currents    302
+## 13          storm surge    253
+## 14 heavy surf/high surf    228
+## 15    extreme windchill    204</code></pre>
+<div id="patterns-in-unmatched-evtypes." class="section level5">
+<h5>Patterns in unmatched evtypes.</h5>
+<ul>
+<li>plural evtypes e.g. “floods”</li>
+<li>hail labelled by size e.g. “hail 15”</li>
+<li>hurricane (typhoon) labelling with many combinations of those words e.g. “hurricane/typhoon”</li>
+</ul>
+<p>None of the correct classifications end in an “s” but many of the incorrect classifications are just plural (…s) versions of correct classifications e.g. winds, storms, currents, floods, squalls (even windss) so remove trailing “s” characters evtypes and then recalculate matched statistics.</p>
+<p>N.B. this can cause errors if a new correct classification is added ending with an “s”, to fix this you could apply this procedure only to non-matching evtypes, and restrict to only removine one “s”.</p>
+<pre class="r"><code># Removing the &quot;s&quot; from the end of evtypes. 
+data$evtype &lt;- sapply(data$evtype, function(x) gsub(&quot;s+$&quot;, &quot;&quot;, x))
+
+# hail is often labelled by its size e.g. &quot;hail 15&quot;, remove size labelling from the end of hail
+data$evtype &lt;- sub(&quot;^hail [0-9]*&quot;, &quot;hail&quot;, data$evtype)
+
+# hurricane (typhoon) often labelled as &quot;hurricane&quot; or &quot;hurricane/typhoon&quot;
+data$evtype &lt;- sub(&quot;hurricane&quot;, &quot;hurricane (typhoon)&quot;, data$evtype)
+data$evtype &lt;- sub(&quot;typhoon&quot;, &quot;hurricane (typhoon)&quot;, data$evtype)
+
+# There are many different flood labels based on geography e.g. &quot;urban flood&quot;, as long as these are not flash floods they can be labelled as simply floods. 
+data$evtype &lt;- 
+  ifelse( grepl(&quot;flood&quot;, data$evtype) &amp; !grepl(&quot;flash&quot;, data$evtype), 
+          &quot;flood&quot;,
+          as.character(data$evtype))
+
+matches &lt;- sapply(data$evtype, function(x) x %in% eventNames)
+# New proportion of matched observation evtypes
+sum(matches) / nrow(data)</code></pre>
+<pre><code>## [1] 0.7734151</code></pre>
+<p>Manually reallocating the most popular non-matched evtypes: - <strong>“tstm wind”:</strong><br />too small to measure wind is categorised as “strong wind” under the condition there was some injury, damage or fatality by the documentation. So we change the labelling of these events under the condition that “fatalities”, “injuries”, “propdmg” (property damage) or “cropdmg” (crop damage) is greater than 0.<br />Otherwise we leave the classification as tstm wind and ignore it later because it doesn’t fit into any category (shouldn’t be in this dataset)<br />Note: categorising wind as strong only if it caused damage biasses some statistics such as the average damage of strong wind.<br />- <strong>“marine tstm wind:”</strong> see “tstm wind”, but categorised as “marine strong wind”<br />- <strong>“urban/sml stream fld” and “flood/flash flood”:</strong><br />for these examples its hard to tell whether it refers to flooding or flash flooding, from the documentation the differences are subjective with the exception that flash flooding cannot last more than 2 to 3 days. As flash floods are much more common (see below) these events are categorised as flash floods unless they last more than 3 days.</p>
+<pre class="r"><code>nrow(filter(data, evtype == &quot;flood&quot;))</code></pre>
+<pre><code>## [1] 25177</code></pre>
+<pre class="r"><code>nrow(filter(data, evtype == &quot;flash flood&quot;))</code></pre>
+<pre><code>## [1] 50999</code></pre>
+<ul>
+<li><strong>tstm wind/hail:</strong> these types of split categories are hard to associate with one category so will be left alone<br /></li>
+<li><strong>fog:</strong> With the data availible there is no way to split events labelled as fog into the two categories of “freezing fog” or “dense fog” so they are left alone.<br /></li>
+<li><strong>snow:</strong> “Heavy snow” is the only snow related event type however the amount of snow required for heavy snow is quite strict but also regionally sensitive, as such we cannot differentiate “heavy snow” from other observations so it is left alone.<br /></li>
+<li>other factors are more obvious and the action is stated in the comments below.</li>
+</ul>
+<pre class="r"><code># tstm wind
+data$evtype &lt;-
+  ifelse(grepl(&quot;tstm wind&quot;, data$evtype) &amp; ((data[&quot;fatalities&quot;] &gt; 0) | (data[&quot;injuries&quot;] &gt; 0) | (data[&quot;propdmg&quot;] &gt; 0) | (data[&quot;cropdmg&quot;] &gt; 0)),
+         sub(&quot;tstm wind&quot;, &quot;strong wind&quot;, data$evtype), 
+         as.character(data$evtype))
+
+# marine tstm wind == marine strong wind (as long as injury / damage / fatality &gt; 0)
+data$evtype &lt;-
+  ifelse(grepl(&quot;marine tstm wind&quot;, data$evtype) &amp; ((data[&quot;fatalities&quot;] &gt; 0) | (data[&quot;injuries&quot;] &gt; 0) | (data[&quot;propdmg&quot;] &gt; 0) | (data[&quot;cropdmg&quot;] &gt; 0)),
+       sub(&quot;marine tstm wind&quot;, &quot;strong wind&quot;, data$evtype), 
+       as.character(data$evtype))
+
+# urban/sml stream fld  (hard to tell without additional information weather this category refers to flooding or flash flooding)
+  # - flash floods do not exist for more than 2 to 3 days
+  # - table floods / flash floods and default to most common. 
+data$evtype &lt;-
+  ifelse((data$evtype == &quot;urban/sml stream fld&quot;) &amp; ((data$endxdate - data$bgnxdate) &lt;= 3),
+         sub(&quot;urban/sml stream fld&quot;, &quot;flash flood&quot;, data$evtype),
+         as.character(data$evtype))
+data$evtype &lt;-
+  ifelse((data$evtype == &quot;urban/sml stream fld&quot;) &amp; ((data$endxdate - data$bgnxdate) &lt;= 3),
+         as.character(data$evtype), 
+         sub(&quot;urban/sml stream fld&quot;, &quot;flood&quot;, data$evtype))
+
+# wild/forest fire  == wildfire
+data$evtype &lt;- gsub(&quot;wild/forest fire&quot;, &quot;wildfire&quot;, data$evtype)
+ 
+# winter weather/mix  = winter weather
+data$evtype &lt;- gsub(&quot;winter weather/mix&quot;, &quot;winter weather&quot;, data$evtype)
+
+# tstm wind/hail  no real way to categorise this into one category so left alone
+
+# flash flooding == flash flood
+data$evtype &lt;- gsub(&quot;flash flooding&quot;, &quot;flash flood&quot;, data$evtype)
+
+# extreme cold  = extreme cold/wind chill
+data$evtype &lt;- gsub(&quot;extreme cold.*&quot;, &quot;extreme cold/wind chill&quot;, data$evtype)
+
+# flood/flash flood  (as long as flood is less than or equal to 3 days, assume flash flood, this is because flash floods are far more common ~2x as likely and is otherwise up to recorders discression (no finite boundaries between the two)
+data$evtype &lt;-
+  ifelse((data$evtype == &quot;flood/flash flood&quot;) &amp; ((data$endxdate - data$bgnxdate) &lt;= 3),
+         as.character(data$evtype), 
+         sub(&quot;flood/flash flood&quot;, &quot;flood&quot;, data$evtype))
+data$evtype &lt;-
+  ifelse((data$evtype == &quot;flood/flash flood&quot;) &amp; ((data$endxdate - data$bgnxdate) &lt;= 3),
+         sub(&quot;flood/flash flood&quot;, &quot;flood&quot;, data$evtype),
+         as.character(data$evtype))
+
+# snow  (heavy snow is only snow related category, definition of heavy snow is regionally defined so difficult to categorise with data availible) so leave this variable alone
+
+# fog  cannot distinguish fog between freezing fog or dense fog with the data so leave alone
+
+# landslide / mudslide are categorised as debris flow
+data$evtype &lt;- sub(&quot;landslide&quot;, &quot;debris flow&quot;, data$evtype)
+data$evtype &lt;- sub(&quot;mudslide&quot;, &quot;debris flow&quot;, data$evtype)</code></pre>
+<p>Recalculate</p>
+<pre class="r"><code>matches &lt;- sapply(data$evtype, function(x) x %in% eventNames)
+# New proportion of matched observation evtypes
+sum(matches) / nrow(data)</code></pre>
+<pre><code>## [1] 0.8790767</code></pre>
+</div>
+</div>
 </div>
 </div>
 

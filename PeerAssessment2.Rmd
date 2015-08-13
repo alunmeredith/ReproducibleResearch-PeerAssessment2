@@ -17,25 +17,204 @@ library(tidyr)
 opts_chunk$set(cache=TRUE)
 ```
 
-Downloading and reading the storm data  
+#### Downloading and reading the storm data  
 
 The data is a comma-separated-value file, compressed via the bzip2 algorithm, the first line is column headers and NA values are coded as blank fields. The read.csv function unzips the file and processes the column headers with its default arguments.  
 
 ```{r download, cache=TRUE}
 url = "http://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2"
 download.file(url, "stormData.csv.bz2")
-stormData <- read.csv("stormData.csv.bz2", na.strings = "")
+data <- read.csv("stormData.csv.bz2", na.strings = "")
 ```
 
-We then tidy the dataset, changing the variable names to tidy names (lower case, no non-alphanumeric characters etc.) and change the date variables to 
-Changing date to a POSIXct date object.
-```{r processing data}
-data <- stormData
-data$BGN_DATE <- as.Date(data$BGN_DATE, format="%m/%d/%Y %H:%M:%S")
-data$END_DATE <- as.Date(data$END_DATE, format = "%m/%d/%Y %H:%M:%S")
-
-data <- mutate(data, year=year(BGN_DATE))
-# Tidying the names, so lower case and no "_/ /."
+We then tidy the dataset, changing the variable names to tidy names (lower case, no non-alphanumeric characters etc.)
+```{r tidying the variable names data}
 names(data) <- tolower(names(data))
 names(data) <- gsub("_", "x", names(data))
+```
+
+#### Tidying the date formats
+There are two variable bgnxdate and endxdate which refer to the start and end dates of the severe weather event. We convert these variables to POSIXct date object. (thiis is important as some event types are differentiated through the duration of the event). We then add a new variable year, which describes the year the events were recorded in so that we can compare the change in events over time (not including seasonal changes). 
+```{r converting to date format}
+data$bgnxdate <- as.Date(data$bgnxdate, format="%m/%d/%Y %H:%M:%S")
+data$endxdate <- as.Date(data$endxdate, format = "%m/%d/%Y %H:%M:%S")
+data <- mutate(data, year=year(bgnxdate))
+```
+Events span 50 years. Over this period collection method has changed substantially  [from the NOAA website:](https://www.ncdc.noaa.gov/stormevents/details.jsp?type=collection) 
+  - **1950:1954:**    Only Tornados were recorded.   
+  - **1955:1992:**    Only tornado, thunderstorm, wind and hail events were keyed from paper publications into digital.   
+  - **1993:1995:**    Only tornado, thuderstorm, wind and hail events have been extracted from the unformated text files.   
+  - **1996:2011:**    All 48 event types recorded  
+
+```{r recorded events with time}
+years <- mutate(data, year= year(bgnxdate)) %>%
+  group_by(year) %>%
+  summarise(number=n())
+       
+filter(years, year %in% c(1950,1960, 1970, 1980, 1990, 2000, 2010))
+```
+
+Because of the limited types of event collected before 1996 we have decided to only analyse data where all event types were recorded so different event types can be compared directly. As such we will only look at the period 1996:2011, below we subset the data to this period.  
+
+Note: Over time the number and type of recorded events have incresed. This is not limited to the changes in collection methods (not increasing numbers from 1960 - 1990 and is likely due to improvements in collection but also better historical records.
+
+```{r subsetting 1996 to 2011}
+data <- filter(data, year >= 1996)
+```
+
+#### Data Cleaning: Event types (evtype)
+
+Although the [documenation](https://d396qusza40orc.cloudfront.net/repdata%2Fpeer2_doc%2Fpd01016005curr.pdf) says there should only be 48 levels to EVTYPE there are in fact `r length(levels(as.factor(data$evtype)))` in this subset (1996:2011) or the data. 
+```{r evtype levels}
+length(levels(as.factor(data$evtype)))
+```
+
+We can match the existing data with a list of the allowed event categories listed below:
+
+```{r listing evtype}
+eventNames <- c("Astronomical Low Tide", "Avalanche", "Blizzard", "Coastal Flood", "Cold/Wind Chill", "Debris Flow", "Dense Fog", "Dense Smoke", "Drought", "Dust Devil", "Dust Storm", "Excessive Heat", "Extreme Cold/Wind Chill", "Flash Flood", "Flood", "Frost/Freeze", "Funnel Cloud", "Freezing Fog", "Hail", "Heat", "Heavy Rain", "Heavy Snow", "High Surf", "High Wind", "Hurricane (Typhoon)", "Ice Storm", "Lake-Effect Snow", "Lakeshore Flood", "Lightning", "Marine Hail", "Marine High Wind", "Marine Strong Wind", "Marine Thunderstorm Wind", "Rip Current", "Seiche", "Sleet", "Storm Surge/Tide", "Strong Wind", "Thunderstorm Wind", "Tornado", "Tropical Depression", "Tropical Storm", "Tsunami", "Volcanic Ash", "Waterspout", "Wildfire", "Winter Storm", "Winter Weather") 
+```
+
+By first normalising all entries to lower case (including our list of allowed factors), we can see the proportion of the data which already matches allowed event names. 
+```{r matching event names}
+eventNames <- tolower(eventNames)
+data$evtype <- tolower(data$evtype)
+# logical vector indexing which evtypes match those given in eventNames
+matches <- sapply(data$evtype, function(x) x %in% eventNames)
+# Proportion of events matched to allowed event names. (evtype)
+sum(matches) / nrow(data)
+# subset of data which matches event names
+```
+
+Looking at the subset of evtype levels which are not matched to the 48 allowed classifications:  
+We can see that "tstm wind" is by far the biggest unmatched evtype and the numbers quickly fall off after the top 6 evtypes. 
+By correctly labelling the top 10 of these evtypes (and some others where obvious patterns occur) we can include the vast majority of mislabelled observations in our analysis. 
+```{r looking at not matched data}
+not.matched <- group_by(data[!matches,], evtype) %>%
+                       summarise(number = n()) %>%
+                       arrange(desc(number))
+
+# Proportion of the unmatched evtypes captured by the 10 most common mislabelled evtypes. 
+sum(not.matched[1:10,2]) / sum(not.matched[,2])
+# Top 15 unmatched evtypes. (event types)
+head(not.matched, 15)
+```
+
+##### Patterns in unmatched evtypes.  
+- plural evtypes e.g. "floods"
+- hail labelled by size e.g. "hail 15"
+- hurricane (typhoon) labelling with many combinations of those words e.g. "hurricane/typhoon"
+
+None of the correct classifications end in an "s" but many of the incorrect classifications are just plural (...s) versions of correct classifications e.g. winds, storms, currents, floods, squalls (even windss) so remove trailing "s" characters evtypes and then recalculate matched statistics.  
+
+N.B. this can cause errors if a new correct classification is added ending with an "s", to fix this you could apply this procedure only to non-matching evtypes, and restrict to only removine one "s". 
+```{r removing plural evtypes}
+# Removing the "s" from the end of evtypes. 
+data$evtype <- sapply(data$evtype, function(x) gsub("s+$", "", x))
+
+# hail is often labelled by its size e.g. "hail 15", remove size labelling from the end of hail
+data$evtype <- sub("^hail [0-9]*", "hail", data$evtype)
+
+# hurricane (typhoon) often labelled as "hurricane" or "hurricane/typhoon"
+data$evtype <- sub("hurricane", "hurricane (typhoon)", data$evtype)
+data$evtype <- sub("typhoon", "hurricane (typhoon)", data$evtype)
+
+# There are many different flood labels based on geography e.g. "urban flood", as long as these are not flash floods they can be labelled as simply floods. 
+data$evtype <- 
+  ifelse( grepl("flood", data$evtype) & !grepl("flash", data$evtype), 
+          "flood",
+          as.character(data$evtype))
+
+matches <- sapply(data$evtype, function(x) x %in% eventNames)
+# New proportion of matched observation evtypes
+sum(matches) / nrow(data)
+```
+
+
+Manually reallocating the most popular non-matched evtypes:
+- **"tstm wind":**  
+too small to measure wind is categorised as "strong wind" under the condition there was some injury, damage or fatality by the documentation. So we change the labelling of these events under the condition that "fatalities", "injuries", "propdmg" (property damage) or "cropdmg" (crop damage) is greater than 0.  
+Otherwise we leave the classification as tstm wind and ignore it later because it doesn't fit into any category (shouldn't be in this dataset)  
+Note: categorising wind as strong only if it caused damage biasses some statistics such as the average damage of strong wind.   
+- **"marine tstm wind:"** see "tstm wind", but categorised as "marine strong wind"  
+- **"urban/sml stream fld" and "flood/flash flood":**  
+for these examples its hard to tell whether it refers to flooding or flash flooding, from the documentation the differences are subjective with the exception that flash flooding cannot last more than 2 to 3 days. As flash floods are much more common (see below) these events are categorised as flash floods unless they last more than 3 days.   
+```{r tabel of flood types}
+nrow(filter(data, evtype == "flood"))
+nrow(filter(data, evtype == "flash flood"))
+```
+- **tstm wind/hail:** these types of split categories are hard to associate with one category so will be left alone  
+- **fog:** With the data availible there is no way to split events labelled as fog into the two categories of "freezing fog" or "dense fog" so they are left alone.   
+- **snow:** "Heavy snow" is the only snow related event type however the amount of snow required for heavy snow is quite strict but also regionally sensitive, as such we cannot differentiate "heavy snow" from other observations so it is left alone.  
+- other factors are more obvious and the action is stated in the comments below.   
+```{r reallocating evtypes}
+# tstm wind
+data$evtype <-
+  ifelse(grepl("tstm wind", data$evtype) & ((data["fatalities"] > 0) | (data["injuries"] > 0) | (data["propdmg"] > 0) | (data["cropdmg"] > 0)),
+         sub("tstm wind", "strong wind", data$evtype), 
+         as.character(data$evtype))
+
+# marine tstm wind == marine strong wind (as long as injury / damage / fatality > 0)
+data$evtype <-
+  ifelse(grepl("marine tstm wind", data$evtype) & ((data["fatalities"] > 0) | (data["injuries"] > 0) | (data["propdmg"] > 0) | (data["cropdmg"] > 0)),
+       sub("marine tstm wind", "strong wind", data$evtype), 
+       as.character(data$evtype))
+
+# urban/sml stream fld  (hard to tell without additional information weather this category refers to flooding or flash flooding)
+  # - flash floods do not exist for more than 2 to 3 days
+  # - table floods / flash floods and default to most common. 
+data$evtype <-
+  ifelse((data$evtype == "urban/sml stream fld") & ((data$endxdate - data$bgnxdate) <= 3),
+         sub("urban/sml stream fld", "flash flood", data$evtype),
+         as.character(data$evtype))
+data$evtype <-
+  ifelse((data$evtype == "urban/sml stream fld") & ((data$endxdate - data$bgnxdate) <= 3),
+         as.character(data$evtype), 
+         sub("urban/sml stream fld", "flood", data$evtype))
+
+# wild/forest fire  == wildfire
+data$evtype <- gsub("wild/forest fire", "wildfire", data$evtype)
+ 
+# winter weather/mix  = winter weather
+data$evtype <- gsub("winter weather/mix", "winter weather", data$evtype)
+
+# tstm wind/hail  no real way to categorise this into one category so left alone
+
+# flash flooding == flash flood
+data$evtype <- gsub("flash flooding", "flash flood", data$evtype)
+
+# extreme cold  = extreme cold/wind chill
+data$evtype <- gsub("extreme cold.*", "extreme cold/wind chill", data$evtype)
+
+# flood/flash flood  (as long as flood is less than or equal to 3 days, assume flash flood, this is because flash floods are far more common ~2x as likely and is otherwise up to recorders discression (no finite boundaries between the two)
+data$evtype <-
+  ifelse((data$evtype == "flood/flash flood") & ((data$endxdate - data$bgnxdate) <= 3),
+         as.character(data$evtype), 
+         sub("flood/flash flood", "flood", data$evtype))
+data$evtype <-
+  ifelse((data$evtype == "flood/flash flood") & ((data$endxdate - data$bgnxdate) <= 3),
+         sub("flood/flash flood", "flood", data$evtype),
+         as.character(data$evtype))
+
+# snow  (heavy snow is only snow related category, definition of heavy snow is regionally defined so difficult to categorise with data availible) so leave this variable alone
+
+# fog  cannot distinguish fog between freezing fog or dense fog with the data so leave alone
+
+# landslide / mudslide are categorised as debris flow
+data$evtype <- sub("landslide", "debris flow", data$evtype)
+data$evtype <- sub("mudslide", "debris flow", data$evtype)
+
+```
+Recalculate the proportion of evtypes matched to allowed values: 
+```{r reprocess evtype matches}
+matches <- sapply(data$evtype, function(x) x %in% eventNames)
+# New proportion of matched observation evtypes
+sum(matches) / nrow(data)
+```
+
+`r sum(matches) / nrow(data)`% of the data is now matched, but also the (maritime) tstm wind remaining has been found not applicable, if we include that we have processed the vast majority of the data:
+
+```{r}
+test<- filter(data, evtype == "tstm wind" | evtype == "marine tstm wind")
+
 ```
