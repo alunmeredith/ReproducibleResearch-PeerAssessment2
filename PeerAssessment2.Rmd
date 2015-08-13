@@ -1,14 +1,25 @@
-Title
+Exploring the most harmful and economically damaging severe weather events. 
 ========
 
-Synopsis 
-==========
-Storm data from the U.S. National Oceanic and Atmospheric Administration's (NOAA) storm database, which tracks characteristics of major storms and weather events from 1950 to November 2011 in the US.  
-Further information on the data can be found in the National Weather Service [Storm Data Documentation](https://d396qusza40orc.cloudfront.net/repdata%2Fpeer2_doc%2Fpd01016005curr.pdf) or the National Climatic Data Centre Storm Events [FAQ](https://d396qusza40orc.cloudfront.net/repdata%2Fpeer2_doc%2FNCDC%20Storm%20Events-FAQ%20Page.pdf) 
+## Synopsis 
 
-Data Processing
-=================
-The data is a comma-separated-value file, compressed via the bzip2 algorithm, the first line as column headers and NA values are coded as blank fields. The read.csv function unzips the file and processes the column headers with its default arguments.  
+In this report we aim to investigate which severe weather events cause the most damage to the population and economically across the United States, using the U.S. National Oceanic and Atmospheric Administration's storm database. From the records covering the period 1996-2011 we found that ......................................
+
+## Data Processing
+
+First we load any required libraries in advance and set caching for knitr as default.  
+```{r setup, message=FALSE}
+library(knitr)
+library(lubridate)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+opts_chunk$set(cache=TRUE)
+```
+
+Downloading and reading the storm data  
+
+The data is a comma-separated-value file, compressed via the bzip2 algorithm, the first line is column headers and NA values are coded as blank fields. The read.csv function unzips the file and processes the column headers with its default arguments.  
 
 ```{r download, cache=TRUE}
 url = "http://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2"
@@ -16,5 +27,15 @@ download.file(url, "stormData.csv.bz2")
 stormData <- read.csv("stormData.csv.bz2", na.strings = "")
 ```
 
-Results
-================
+We then tidy the dataset, changing the variable names to tidy names (lower case, no non-alphanumeric characters etc.) and change the date variables to 
+Changing date to a POSIXct date object.
+```{r processing data}
+data <- stormData
+data$BGN_DATE <- as.Date(data$BGN_DATE, format="%m/%d/%Y %H:%M:%S")
+data$END_DATE <- as.Date(data$END_DATE, format = "%m/%d/%Y %H:%M:%S")
+
+data <- mutate(data, year=year(BGN_DATE))
+# Tidying the names, so lower case and no "_/ /."
+names(data) <- tolower(names(data))
+names(data) <- gsub("_", "x", names(data))
+```

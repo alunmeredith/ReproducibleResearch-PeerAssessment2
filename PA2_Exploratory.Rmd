@@ -3,6 +3,7 @@ library(knitr)
 library(lubridate)
 library(dplyr)
 library(ggplot2)
+library(tidyr)
 opts_chunk$set(cache=TRUE)
 ```
 Downloading and reading the storm data
@@ -24,10 +25,7 @@ names(data) <- tolower(names(data))
 names(data) <- gsub("_", "x", names(data))
 ```
 
-Selecting the variables which are relavent to primary questions (injuries, damage, event type)
-This step is mainly for later analysis rather than exploratory analysis. 
-
-Events span 50 years. Over this period collection method and 
+Events span 50 years. Over this period collection method has changed substantially 
   - *1950:1954:* Only Tornados were recorded. 
   - *1955:1992:* Only tornado, thunderstorm, wind and hail events were keyed from paper publications into digital. 
   - *1993:1995:* Only tornado, thuderstorm, wind and hail events have been extracted from the unformated text files. 
@@ -39,7 +37,7 @@ years <- mutate(data, year= year(bgnxdate)) %>%
   group_by(year) %>%
   summarise(number=n())
        
-qplot(year, number, data=years)
+filter(years, year %in% c(1950,1960, 1970, 1980, 1990, 2000, 2010))
 ```
 
 event types
@@ -167,18 +165,127 @@ Approximately 80% (80.7%) of the data is now categorised within the 48 allowed f
 
 analysis
 ==========
-Therefore we now drop all the remaining observations, and also select variables relavent to the analysis
+
+### Across the United States, which types of events (as indicated in the EVTYPE variable) are most harmful with respect to population health
+
+Harm can be categorised both as injury and fatality. It is impossible to definitively compare these two so we shall look at them seperately. 
+
+We will only look at the observations with allowed evtypes after trying to match these as effectively as possible. 
+
+As 1996 was the [first year all 48 event types were recorded](https://www.ncdc.noaa.gov/stormevents/details.jsp) we will analyse from only this time 
 ```{r selecting relavent subset}
-subset <- select(data, bgnxdate, endxdate, year, evtype, fatalities, injuries, propdmg, propdmgexp, cropdmg, cropdmgexp, remarks, wfo, refnum)
+subset <- select(data, bgnxdate, endxdate, year, evtype, fatalities, injuries, propdmg, propdmgexp, cropdmg, cropdmgexp, remarks, wfo, refnum) %>%
+  filter(year > 1995)
 subset <- subset[subset$evtype %in% eventNames,]
-subset <- factor(subset) # resets the levels
+subset$evtype <- factor(subset$evtype) # resets the levels
 ```
 
-```{r}
-test <- group_by(subset, evtype, year) %>%
-  summarise( totalfatalities = sum(fatalities), totalinjuries = sum(injuries))
+While we have accounted for the increased types of events recorded there is still a correlation with number of observations and time. As this histogram binning each year shows. 
 
-test2 <- filter(test, evtype == "flood")
-qplot(year, totalfatalities, data=test2)
+```{r another observation time histogram}
+qplot(bgnxdate, data = subset, binwidth = 365, ylim = c(0,80000))
+```
+This is likeley due to improved recording over time. One way to factor for this is to produce a weighting based ona  linear regression model over time. The difficulty here is that certain event types will be affected more/less by this record keeping, for example tornadoes which have been recorded since 1950 are probably quite acccurately recorded or tsunamis which are very devistating (and hard to miss) are also probably accurately recorded. However if you complete seperate linear regression models for each event type you would hide any time related phenomenon which could be occuring. Also some event types are rare and there would be too little data to fit a linear model. Because of these we  will take a single linear regression model for all event types but be aware that events such as tornadoes or tsunamis are likely over estimates.  
+
+```{r linear regression with time}
+yearly.observations <- group_by(subset, year) %>%
+  summarise(events = n())
+
+# We use a linear model instead of just relating observations as a proportion of acutal 2011 readings so that the system is "smoothed", if 2011 is slightly above/below average it doesn't have a big effect and if the year you are weighting had a lot of tornadoes that doesn't have a large effect on how heat waves are weighted that year. 
+year.model <- lm(events ~ year, yearly.observations)
+
+years <- yearly.observations$year
+
+year.predict <- predict(year.model, data.frame(year = seq(1996,2011,1)))
+yearly.observations$lmpredict <- year.predict
+yearly.observations <- mutate(yearly.observations, weighting = lmpredict[length(lmpredict)] / lmpredict, weighted.events = events*weighting)
+qplot(year, weighted.events, data=yearly.observations, ylim=c(0,80000)) + geom_smooth(method="lm")
 ```
 
+As you can see from the plot, there are some outlier years, 1996,1998, 2008,2011 where there were a lot of observed weather events but the majority of years are now flatly spread. 
+
+```{r weighting injures/fatalities}
+evtype.health <- group_by(subset,year, evtype) %>%
+  summarise(injuries = sum(injuries), fatalities = sum(fatalities))
+
+weighted.injuries <- select(evtype.health, -fatalities) %>%
+  spread(evtype, injuries)
+weighted.injuries[,2:length(weighted.injuries)] <- apply(weighted.injuries[,2:length(weighted.injuries)], 2, function(x) x*yearly.observations$weighting)
+weighted.injuries <- gather(weighted.injuries, evtype, injuries, -year)
+
+weighted.fatalities <- select(evtype.health, -injuries) %>%
+  spread(evtype, fatalities)
+weighted.fatalities[,2:length(weighted.fatalities)] <- apply(weighted.fatalities[,2:length(weighted.fatalities)], 2, function(x) x*yearly.observations$weighting)
+weighted.fatalities <- gather(weighted.fatalities, evtype, fatalities, -year)
+
+weighted.evtype.health <- weighted.injuries
+weighted.evtype.health$fatalities <- weighted.fatalities$fatalities
+```
+As seen in the plot, tornadoes are the biggest cause of documented injuries and fatalities. I am still potentially skeptical of this due tornadoes likely being well documented in contrast to the other evtypes, and consistently documented (leading to the linear model inflating it disproportionately. That said even as an overestimate tornadoes are a large concern. With flooding and excessive heat as the two other main causes of injury.  
+Excessive heat is a much bigger cause of fatality, and flash floods are a much bigger concern than floods in this regard. While tornadoes are still a major concern. 
+```{r plotting high fatality or injury event types}
+total.injuries <- group_by(weighted.evtype.health, evtype) %>%
+  summarise(injuries = sum(injuries, na.rm=T), fatalities = sum(fatalities, na.rm=T)) %>%
+  arrange(desc(injuries))
+
+temp <- head(arrange(total.injuries, desc(injuries)),10)
+qplot(evtype, injuries, data=temp)
+
+temp <- head(arrange(total.injuries, desc(fatalities)),10)
+qplot(evtype, fatalities, data=temp)
+```
+
+## Across the United States, which types of events have the greatest economic consequences?
+
+Property damage and crop damage are combinations of two numbers, a number and a multiplier. The allowed values for the multiplier are "B" "M" and "K" for billion, million, kilo(thousand). In the total dataset, there are a number of observations outside of these values. However in the subset of 1996+ and the converted event type factors there is only one observation outside these factors. This observation has a prop multiplier of 0 but also a propdmg value of 0, so the 0 can be changed to an NA. 
+```{r replacing unallowed values}
+filter(subset, propdmgexp == "0")
+subset$cropdmgexp <- factor(subset$cropdmgexp)
+subset$propdmgexp <- factor(subset$propdmgexp)
+subset$propdmgexp[which(subset$propdmgexp == "0")] <- NA
+```
+
+We now multiply the values of cropdmg and propdmg by the multipliers 1000 for K etc. 
+```{r calculating prop and crop damage}
+if (subset$cropdmgexp == "K") { subset$cropdamage <- subset$cropdmg * 1000
+} else if (subset$cropdmgexp == "M") { subset$cropdamage <- subset$cropdmg * 1000000
+} else if (subset$cropdmgexp == "B") { subset$cropdamage <- subset$cropdmg * 1000000000
+} else { subset$cropdamage <- NA
+}
+
+if (subset$propdmgexp == "K") {subset$propdamage <- subset$propdmg * 1000
+}else if (subset$propdmgexp == "M") {subset$propdamage <- subset$propdmg * 1000000
+}else if (subset$propdmgexp == "B") {subset$propdamage <- subset$propdmg * 1000000000
+} else {subset$propdamage <- NA
+}
+```
+
+```{r weighting damage}
+damage.analysis <- select(subset, evtype, cropdamage, propdamage, year) %>%
+  group_by(evtype, year) %>%
+  summarise(cropdamage = sum(cropdamage), propdamage = sum(propdamage))
+
+weighted.cropdmg <- select(damage.analysis, -propdamage) %>%
+  spread(evtype, cropdamage)
+weighted.cropdmg[,2:length(weighted.cropdmg)] <- apply(weighted.cropdmg[,2:length(weighted.cropdmg)], 2, function(x) x*yearly.observations$weighting)
+weighted.cropdmg <- gather(weighted.cropdmg, evtype, cropdamage, -year)
+
+weighted.propdmg <- select(damage.analysis, -cropdamage) %>%
+  spread(evtype, propdamage)
+weighted.propdmg[,2:length(weighted.propdmg)] <- apply(weighted.propdmg[,2:length(weighted.propdmg)], 2, function(x) x*yearly.observations$weighting)
+weighted.propdmg <- gather(weighted.propdmg, evtype, propdamage, -year)
+
+weighted.damage <- weighted.cropdmg
+weighted.damage$propdamage <- weighted.propdmg$propdamage
+```
+
+```{r damage plots}
+test <- group_by(weighted.damage, evtype) %>%
+  summarise(cropdamage = sum(cropdamage, na.rm=T), propdamage = sum(propdamage, na.rm=T))
+
+temp <- arrange(test, desc(cropdamage))
+qplot(evtype,  cropdamage, data=head(temp,10))
+
+temp <- arrange(test, desc(propdamage))
+qplot(evtype, propdamage, data=head(temp,10))
+```
