@@ -3,7 +3,7 @@ Exploring the most harmful and economically damaging severe weather events.
 
 ## Synopsis 
 
-In this report we aim to investigate which severe weather events cause the most damage to the population and economically across the United States, using the U.S. National Oceanic and Atmospheric Administration's storm database. From the records covering the period 1996-2011 we found that ......................................
+In this report we aim to investigate which severe weather events cause the most damage to the population and economically across the United States, using the U.S. National Oceanic and Atmospheric Administration's storm database. From the records covering the period 1996-2011 we processed a large proportion of the data into its appropriate category, as described by the NOAA documentation. We weighted the observations through a linear regression model based on the year of recording to counteract the increasing number of observations through more complete records over time and compared the amount of damage to both population and economically of the different severe event types. We found that tornados and excessive heat are the biggest causes of damage to population health while hail, wind and flood are the greatest cause of economic damage across the US. 
 
 ## Data Processing
 
@@ -19,7 +19,7 @@ opts_chunk$set(cache=TRUE)
 
 #### Downloading and reading the storm data  
 
-The data is a comma-separated-value file, compressed via the bzip2 algorithm, the first line is column headers and NA values are coded as blank fields. The read.csv function unzips the file and processes the column headers with its default arguments.  
+The data is a comma-separated-value file, compressed via the bzip2 algorithm, the first line is column headers and NA values are coded as blank fields. The read.csv function unzips the file and processes the column headers with its default arguments, adding an arguement to process the NA strings properly.  
 
 ```{r download, cache=TRUE}
 url = "http://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2"
@@ -27,20 +27,22 @@ download.file(url, "stormData.csv.bz2")
 data <- read.csv("stormData.csv.bz2", na.strings = "")
 ```
 
-We then tidy the dataset, changing the variable names to tidy names (lower case, no non-alphanumeric characters etc.)
+###Tidy the dataset: 
+#### Tidy variable names 
+Change variable names to lower case and remove non-alphanumeric characters
 ```{r tidying the variable names data}
 names(data) <- tolower(names(data))
 names(data) <- gsub("_", "x", names(data))
 ```
 
 #### Tidying the date formats
-There are two variable bgnxdate and endxdate which refer to the start and end dates of the severe weather event. We convert these variables to POSIXct date object. (thiis is important as some event types are differentiated through the duration of the event). We then add a new variable year, which describes the year the events were recorded in so that we can compare the change in events over time (not including seasonal changes). 
+There are two variable bgnxdate and endxdate which refer to the start and end dates of the severe weather event. We convert these variables to POSIXct date object (this is important as some event types are differentiated through their). We then add a new variable year, which describes the year the events were recorded in so that we can compare the change in events over time (while ignoring seasonal patterns). 
 ```{r converting to date format}
 data$bgnxdate <- as.Date(data$bgnxdate, format="%m/%d/%Y %H:%M:%S")
 data$endxdate <- as.Date(data$endxdate, format = "%m/%d/%Y %H:%M:%S")
 data <- mutate(data, year=year(bgnxdate))
 ```
-Events span 50 years. Over this period collection method has changed substantially  [from the NOAA website:](https://www.ncdc.noaa.gov/stormevents/details.jsp?type=collection) 
+Events span 50 years. Over this period collection method has changed substantially as described on the[NOAA website:](https://www.ncdc.noaa.gov/stormevents/details.jsp?type=collection)  
   - **1950:1954:**    Only Tornados were recorded.   
   - **1955:1992:**    Only tornado, thunderstorm, wind and hail events were keyed from paper publications into digital.   
   - **1993:1995:**    Only tornado, thuderstorm, wind and hail events have been extracted from the unformated text files.   
@@ -50,13 +52,14 @@ Events span 50 years. Over this period collection method has changed substantial
 years <- mutate(data, year= year(bgnxdate)) %>%
   group_by(year) %>%
   summarise(number=n())
-       
+
+# Table the number of observations in each of the following years. 
 filter(years, year %in% c(1950,1960, 1970, 1980, 1990, 2000, 2010))
 ```
 
 Because of the limited types of event collected before 1996 we have decided to only analyse data where all event types were recorded so different event types can be compared directly. As such we will only look at the period 1996:2011, below we subset the data to this period.  
 
-Note: Over time the number and type of recorded events have incresed. This is not limited to the changes in collection methods (not increasing numbers from 1960 - 1990 and is likely due to improvements in collection but also better historical records.
+Note: Over time the number and type of recorded events have incresed. This is not limited to the changes in collection methods (numbers still increase from 1960 - 1990 as seen in the table above) and is likely due to improvements in collection but also better historical records.
 
 ```{r subsetting 1996 to 2011}
 data <- filter(data, year >= 1996)
@@ -64,18 +67,18 @@ data <- filter(data, year >= 1996)
 
 #### Data Cleaning: Event types (evtype)
 
-Although the [documenation](https://d396qusza40orc.cloudfront.net/repdata%2Fpeer2_doc%2Fpd01016005curr.pdf) says there should only be 48 levels to EVTYPE there are in fact `r length(levels(as.factor(data$evtype)))` in this subset (1996:2011) or the data. 
+Although the [documentation](https://d396qusza40orc.cloudfront.net/repdata%2Fpeer2_doc%2Fpd01016005curr.pdf) says there should only be 48 levels to EVTYPE we observe `r length(levels(as.factor(data$evtype)))` in this subset (1996:2011) of the data. 
 ```{r evtype levels}
 length(levels(as.factor(data$evtype)))
 ```
 
-We can match the existing data with a list of the allowed event categories listed below:
+We can match the existing data with a list of the allowed event categories from the documentation, first by listing the allowed categories:
 
 ```{r listing evtype}
 eventNames <- c("Astronomical Low Tide", "Avalanche", "Blizzard", "Coastal Flood", "Cold/Wind Chill", "Debris Flow", "Dense Fog", "Dense Smoke", "Drought", "Dust Devil", "Dust Storm", "Excessive Heat", "Extreme Cold/Wind Chill", "Flash Flood", "Flood", "Frost/Freeze", "Funnel Cloud", "Freezing Fog", "Hail", "Heat", "Heavy Rain", "Heavy Snow", "High Surf", "High Wind", "Hurricane (Typhoon)", "Ice Storm", "Lake-Effect Snow", "Lakeshore Flood", "Lightning", "Marine Hail", "Marine High Wind", "Marine Strong Wind", "Marine Thunderstorm Wind", "Rip Current", "Seiche", "Sleet", "Storm Surge/Tide", "Strong Wind", "Thunderstorm Wind", "Tornado", "Tropical Depression", "Tropical Storm", "Tsunami", "Volcanic Ash", "Waterspout", "Wildfire", "Winter Storm", "Winter Weather") 
 ```
 
-By first normalising all entries to lower case (including our list of allowed factors), we can see the proportion of the data which already matches allowed event names. 
+Normalising all entries to lower case (including our list of allowed factors), we can see the proportion of the data which already matches allowed event names. 
 ```{r matching event names}
 eventNames <- tolower(eventNames)
 data$evtype <- tolower(data$evtype)
@@ -83,31 +86,33 @@ data$evtype <- tolower(data$evtype)
 matches <- sapply(data$evtype, function(x) x %in% eventNames)
 # Proportion of events matched to allowed event names. (evtype)
 sum(matches) / nrow(data)
-# subset of data which matches event names
 ```
 
-Looking at the subset of evtype levels which are not matched to the 48 allowed classifications:  
-We can see that "tstm wind" is by far the biggest unmatched evtype and the numbers quickly fall off after the top 6 evtypes. 
+The table below shows the number of observations for different event type (evtype) factors which are not in our 48 values.   
+We can see that "tstm wind" is by far the biggest unmatched evtype and the numbers quickly fall off after the top 6 evtypes.  
 By correctly labelling the top 10 of these evtypes (and some others where obvious patterns occur) we can include the vast majority of mislabelled observations in our analysis. 
 ```{r looking at not matched data}
+# Investingating which unmatched evtype factors are most common
 not.matched <- group_by(data[!matches,], evtype) %>%
                        summarise(number = n()) %>%
                        arrange(desc(number))
 
-# Proportion of the unmatched evtypes captured by the 10 most common mislabelled evtypes. 
-sum(not.matched[1:10,2]) / sum(not.matched[,2])
 # Top 15 unmatched evtypes. (event types)
 head(not.matched, 15)
+
+# Proportion of the unmatched evtypes captured by the 10 most common mislabelled evtypes. 
+sum(not.matched[1:10,2]) / sum(not.matched[,2])
 ```
 
-##### Patterns in unmatched evtypes.  
+**Matching patterns in unmatched evtypes.**  
+By reading through the list of unmatched evtype factors we can identify some patterns to help match them correctly
 - plural evtypes e.g. "floods"
 - hail labelled by size e.g. "hail 15"
 - hurricane (typhoon) labelling with many combinations of those words e.g. "hurricane/typhoon"
 
 None of the correct classifications end in an "s" but many of the incorrect classifications are just plural (...s) versions of correct classifications e.g. winds, storms, currents, floods, squalls (even windss) so remove trailing "s" characters evtypes and then recalculate matched statistics.  
 
-N.B. this can cause errors if a new correct classification is added ending with an "s", to fix this you could apply this procedure only to non-matching evtypes, and restrict to only removine one "s". 
+N.B. This can cause errors if a new correct classification is added ending with an "s", to fix this you could apply this procedure only to non-matching evtypes, and restrict to only removine one "s". 
 ```{r removing plural evtypes}
 # Removing the "s" from the end of evtypes. 
 data$evtype <- sapply(data$evtype, function(x) gsub("s+$", "", x))
@@ -124,43 +129,41 @@ data$evtype <-
   ifelse( grepl("flood", data$evtype) & !grepl("flash", data$evtype), 
           "flood",
           as.character(data$evtype))
-
-matches <- sapply(data$evtype, function(x) x %in% eventNames)
-# New proportion of matched observation evtypes
-sum(matches) / nrow(data)
 ```
 
 
-Manually reallocating the most popular non-matched evtypes:
+**Manually reassigning the most common non-matched evtypes:**  
+We also go through the top 10 most common unmatched evtypes and try to categorise them according to the documentation. 
 - **"tstm wind":**  
 too small to measure wind is categorised as "strong wind" under the condition there was some injury, damage or fatality by the documentation. So we change the labelling of these events under the condition that "fatalities", "injuries", "propdmg" (property damage) or "cropdmg" (crop damage) is greater than 0.  
 Otherwise we leave the classification as tstm wind and ignore it later because it doesn't fit into any category (shouldn't be in this dataset)  
-Note: categorising wind as strong only if it caused damage biasses some statistics such as the average damage of strong wind.   
+*Note:* categorising wind as strong only if it caused damage biasses some statistics such as the average damage of strong wind.     
+
 - **"marine tstm wind:"** see "tstm wind", but categorised as "marine strong wind"  
+- **tstm wind/hail:** these types of split categories are hard to associate with one category so will be left alone  
+- **fog:** With the data availible there is no way to split events labelled as fog into the two categories of "freezing fog" or "dense fog" so they are left alone.   
+- **snow:** "Heavy snow" is the only snow related event type however the amount of snow required for heavy snow is quite strict but also regionally sensitive, as such we cannot differentiate "heavy snow" from other observations so it is left alone.  
 - **"urban/sml stream fld" and "flood/flash flood":**  
 for these examples its hard to tell whether it refers to flooding or flash flooding, from the documentation the differences are subjective with the exception that flash flooding cannot last more than 2 to 3 days. As flash floods are much more common (see below) these events are categorised as flash floods unless they last more than 3 days.   
 ```{r tabel of flood types}
 nrow(filter(data, evtype == "flood"))
 nrow(filter(data, evtype == "flash flood"))
 ```
-- **tstm wind/hail:** these types of split categories are hard to associate with one category so will be left alone  
-- **fog:** With the data availible there is no way to split events labelled as fog into the two categories of "freezing fog" or "dense fog" so they are left alone.   
-- **snow:** "Heavy snow" is the only snow related event type however the amount of snow required for heavy snow is quite strict but also regionally sensitive, as such we cannot differentiate "heavy snow" from other observations so it is left alone.  
-- other factors are more obvious and the action is stated in the comments below.   
+- Other factors are more obvious and the action is stated in the commented code below.   
 ```{r reallocating evtypes}
-# tstm wind
+# tstm wind:
 data$evtype <-
   ifelse(grepl("tstm wind", data$evtype) & ((data["fatalities"] > 0) | (data["injuries"] > 0) | (data["propdmg"] > 0) | (data["cropdmg"] > 0)),
          sub("tstm wind", "strong wind", data$evtype), 
          as.character(data$evtype))
 
-# marine tstm wind == marine strong wind (as long as injury / damage / fatality > 0)
+# marine tstm wind: == marine strong wind (as long as injury / damage / fatality > 0)
 data$evtype <-
   ifelse(grepl("marine tstm wind", data$evtype) & ((data["fatalities"] > 0) | (data["injuries"] > 0) | (data["propdmg"] > 0) | (data["cropdmg"] > 0)),
        sub("marine tstm wind", "strong wind", data$evtype), 
        as.character(data$evtype))
 
-# urban/sml stream fld  (hard to tell without additional information weather this category refers to flooding or flash flooding)
+# urban/sml stream fld:  (hard to tell without additional information weather this category refers to flooding or flash flooding)
   # - flash floods do not exist for more than 2 to 3 days
   # - table floods / flash floods and default to most common. 
 data$evtype <-
@@ -172,21 +175,21 @@ data$evtype <-
          as.character(data$evtype), 
          sub("urban/sml stream fld", "flood", data$evtype))
 
-# wild/forest fire  == wildfire
+# wild/forest fire:  == wildfire
 data$evtype <- gsub("wild/forest fire", "wildfire", data$evtype)
  
-# winter weather/mix  = winter weather
+# winter weather/mix:  = winter weather
 data$evtype <- gsub("winter weather/mix", "winter weather", data$evtype)
 
-# tstm wind/hail  no real way to categorise this into one category so left alone
+# tstm wind/hail:  no real way to categorise this into one category so left alone
 
-# flash flooding == flash flood
+# flash flooding: == flash flood
 data$evtype <- gsub("flash flooding", "flash flood", data$evtype)
 
-# extreme cold  = extreme cold/wind chill
+# extreme cold:  = extreme cold/wind chill
 data$evtype <- gsub("extreme cold.*", "extreme cold/wind chill", data$evtype)
 
-# flood/flash flood  (as long as flood is less than or equal to 3 days, assume flash flood, this is because flash floods are far more common ~2x as likely and is otherwise up to recorders discression (no finite boundaries between the two)
+# flood/flash flood: (as long as flood is less than or equal to 3 days, assume flash flood, this is because flash floods are far more common ~2x as likely and is otherwise up to recorders discression (no finite boundaries between the two)
 data$evtype <-
   ifelse((data$evtype == "flood/flash flood") & ((data$endxdate - data$bgnxdate) <= 3),
          as.character(data$evtype), 
@@ -196,16 +199,16 @@ data$evtype <-
          sub("flood/flash flood", "flood", data$evtype),
          as.character(data$evtype))
 
-# snow  (heavy snow is only snow related category, definition of heavy snow is regionally defined so difficult to categorise with data availible) so leave this variable alone
+# snow: (heavy snow is only snow related category, definition of heavy snow is regionally defined so difficult to categorise with data availible) so leave this variable alone
 
-# fog  cannot distinguish fog between freezing fog or dense fog with the data so leave alone
+# fog: cannot distinguish fog between freezing fog or dense fog with the data so leave alone
 
-# landslide / mudslide are categorised as debris flow
+# landslide / mudslide: categorised as debris flow
 data$evtype <- sub("landslide", "debris flow", data$evtype)
 data$evtype <- sub("mudslide", "debris flow", data$evtype)
 
 ```
-Recalculate the proportion of evtypes matched to allowed values: 
+Recalculate the proportion of evtypes now matched to allowed values: 
 ```{r reprocess evtype matches}
 matches <- sapply(data$evtype, function(x) x %in% eventNames)
 # New proportion of matched observation evtypes
@@ -215,6 +218,212 @@ sum(matches) / nrow(data)
 `r sum(matches) / nrow(data)`% of the data is now matched, but also the (maritime) tstm wind remaining has been found not applicable, if we include that we have processed the vast majority of the data:
 
 ```{r}
-test<- filter(data, evtype == "tstm wind" | evtype == "marine tstm wind")
+data$evtype <- as.factor(data$evtype)
+( nrow(filter(data, evtype == "tstm wind" | evtype == "marine tstm wind")) + sum(matches)) / nrow(data)
+```
+
+#### Subsetting
+
+We are only looking at the observations after 1996 (for the reasons stated before) with allowed evtypes, after reclassifying as many of them as possible, this leaves some of the data left unprocessed (~1%). 
+
+```{r comparing processed and not processed data}
+# summary of unprocessed data (evtypes which we haven't parsed)
+summary(
+  filter(data[!matches,], evtype != "tstm wind" & evtype != "marine tstm wind") %>%
+  select(year, evtype, fatalities, injuries))
+
+subset <- data[matches,]
+subset$evtype <- factor(subset$evtype)
+
+# Summary of processed data (matching with allowed evtypes)
+summary(select(subset, year, evtype, fatalities, injuries))
 
 ```
+
+We can see from these two summaries that the data which has been left unprocessed has approximately 5 times the injury and fatality rate. This is cause for concern however because they represent a very small proportion of the data and the maximum values are quite small we can be fairly assured that this data wouldn't have a large effect on the final results. However if a more in depth study were to be carried out on this data we would process more of this data. 
+
+Finally we will subset our data by the relavent factor variables to the questions we are trying to answer, which event types cause the greatest damage, while retaining the reference number so we can get other information like the remarks if needed. 
+```{r selecting relavent subset}
+subset <- select(subset, year, evtype, fatalities, injuries, propdmg, propdmgexp, cropdmg, cropdmgexp, refnum)
+```
+
+#### Dealing with time correlation
+
+While we have accounted for the increased types of events recorded there is still a correlation with number of observations and time. As this linear regression with very low P value shows. 
+
+```{r linear regression time model}
+yearly <- group_by(subset, year) %>%
+  summarise(events = n())
+
+year.model <- lm(events ~ year, yearly)
+
+summary(year.model)
+```
+
+This is likeley due to improved recording over time. One way to factor for this is to produce a weighting based on a  linear regression model over time. The difficulty here is that certain event types will be affected more/less by the improved record keeping or other underlying factors. For example tornadoes which have been recorded since 1950 are probably quite acccurately recorded or tsunamis which are very devistating (and hard to miss) are also probably accurately recorded.  
+However if you complete seperate linear regression models for each event type you would hide any time related phenomenon which could be occuring. Also some event types are rare and there would be too little data to fit a linear model. Because of these we  will take a single linear regression model for all event types but be aware that events such as tornadoes or tsunamis are likely over estimates.  
+We use a linear model instead of just relating observations as a proportion of acutal 2011 readings so that the system is "smoothed", if 2011 is slightly above/below average it doesn't have a big effect and if the year you are weighting had a lot of tornadoes that doesn't have a large effect on how heat waves are weighted that year. 
+
+```{r linear regression with time, fig.align='center', fig.height=3, fig.width=7}
+# make predicitons for each discrete year
+year.predict <- predict(year.model, data.frame(year = seq(1996,2011,1)))
+yearly$lmpredict <- year.predict
+
+# Produce a weighting which would normalise each prediction to the mean predicted value
+# Apply that weighting to recorded values. 
+weights <- mutate(yearly, weighting = max(lmpredict) / lmpredict, weighted.events = events*weighting)
+
+#Tidy that dataset to a tall dataset so facets can be plotted easily
+yearly <- 
+  select(weights, -lmpredict, -weighting) %>%
+  gather(weighted, events, - year) 
+
+# Plot before and after picture
+ggplot(yearly, aes(year, events)) +
+  geom_point() + 
+  geom_smooth(method="lm") +
+  facet_grid(.~weighted) +
+  labs(list(title= "Comparing weighted and unweighted events over time", x="Year", y="Number of severe weather events"))
+
+```
+
+As you can see from the plot, there are some outlier years, 1996,1998, 2008,2011 where there were a lot of observed weather events but the majority of years are now flatly spread.  
+We have centred our weighted events around the most recent year availible 2011, while this is more affected by the random noise in the 2011 data we have done this on the assumption that recordings are getting more complete with time and therefore 2011 shows the most complete year of observations and the best one to predict the number of events in the past. However as we are comparing the differences in different events primarily this has no impact on identifying these patterns either way. 
+Note due to using the predicted values to base our weighting the weighted events are still not perfectly flat, however using this method retains a lot more of the characteristics of each year, noticing how the shape of the data around the regression line is very similar in both facets. 
+
+Results
+==========
+
+### Across the United States, which types of events (as indicated in the EVTYPE variable) are most harmful with respect to population health?
+___
+
+Harm can be categorised both as injury and fatality. We can't definitively compare these two so we shall look at them seperately. 
+
+First we apply our weight our observations based on the year they were recorded to counteract the time dependence of the observations as discussed in the previous section. 
+
+```{r weighting injures/fatalities}
+# summarising fatalities and injuries by year and event type
+health <- group_by(subset,year, evtype) %>%
+  summarise(injuries = sum(injuries), fatalities = sum(fatalities))
+
+# Applying weighting to injuries
+weightedInj <- select(health, -fatalities) %>%
+  spread(evtype, injuries)
+weightedInj[,2:length(weightedInj)] <- apply(weightedInj[,2:length(weightedInj)], 2, function(x) x*weights$weighting)
+weightedInj <- gather(weightedInj, evtype, injuries, -year)
+
+# Applying weighting to fatalities
+weightedFat <- select(health, -injuries) %>%
+  spread(evtype, fatalities)
+weightedFat[,2:length(weightedFat)] <- apply(weightedFat[,2:length(weightedFat)], 2, function(x) x*weights$weighting)
+weightedFat <- gather(weightedFat, evtype, fatalities, -year)
+
+# Combining injuries and fatalities together
+weightedHealth <- weightedInj
+weightedHealth$fatalities <- weightedFat$fatalities
+```
+
+
+Now we can tidy and plot this data to show the number of injuries and fatalities of different servere weather events. 
+```{r plotting high fatality or injury event types, fig.align='center', fig.width=10}
+# Summarising fatalities and injuries by event type
+# Then gathering into tall format for easy faceting
+weightedHealth <- group_by(weightedHealth, evtype) %>%
+  summarise(injuries = sum(injuries, na.rm=T), fatalities = sum(fatalities, na.rm=T)) %>%
+  arrange(desc(injuries)) %>%
+  gather(type, number, -evtype)
+
+# Plot injuries and fatalities
+ggplot(weightedHealth, aes(evtype, number)) +
+  geom_point() +
+  facet_grid(type~., scales = "free") +
+  labs(list(title = "Comparing injuries and fatalities of different severe weather events", x= "Severe weather event type", y="Number of Injuries / Fatalities")) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = -0.1))
+
+```
+As seen in the plot tornados are the biggest form of injury and second biggest contributor to fatalities of all the severe weather events. Strong wind, lightning, floods, flash floods and excessive heat are all have relatively large injury rates. 
+
+When you look at fatalities however excessive heat, flash floods, lightning and rip currents all increase their proportion of fatalitiy compared to injuries. While tornados are still a major threat, floods and strong wind decrease their % share. Excessive heat becomes the no.1 cause of fatality from severe weather event with approximately 1 death to 3.5 injuries. 
+
+Overall tornadoes seem like the biggest threat to population  health as a whole, however some skepticism should be reserved as tornadoes have been documented for the longest and therefore likely to see less improvements in documentation levels over time which is one of the factors explaining the linear trend, because of this tornados may have been overestimated slightly.  
+
+## Across the United States, which types of events have the greatest economic consequences?
+
+#### Data cleaning: calculate absolute damage values
+Property damage and crop damage are combinations of two numbers, a number and a multiplier. First we must combine these numbers together to get absolute damage values. 
+
+The allowed values for the multiplier are "B" "M" and "K" for billion, million, kilo(thousand). In the total dataset, there are a number of observations outside of these values. However in the subset of 1996+ and the converted event type factors there is only one observation outside these factors. This observation has a prop multiplier of 0 but also a propdmg value of 0, so the 0 can be changed to an NA. 
+```{r replacing unallowed values}
+# Looking at the factors of cropdmgexp and propdmgexp
+table(subset$cropdmgexp)
+table(subset$propdmgexp)
+# Looking at the observation with not-allowed factor for propdmgexp
+filter(subset, propdmgexp == "0")
+# Assigning that observation a value of NA
+subset$propdmgexp[which(subset$propdmgexp == "0")] <- NA
+# Reset factor levels
+subset$cropdmgexp <- factor(subset$cropdmgexp)
+subset$propdmgexp <- factor(subset$propdmgexp)
+```
+
+We now multiply the values of cropdmg and propdmg by the multipliers 1000 for K etc. 
+```{r calculating prop and crop damage}
+for(i in 1:length(subset)){
+  # Multiplying the cropdmg by multipliers associated with cropdmgexp factors
+  if (isTRUE(subset$cropdmgexp[i] == "K")) { subset$cropdamage[i] <- subset$cropdmg[i] * 1000
+  } else if (isTRUE(subset$cropdmgexp[i] == "M")) { subset$cropdamage[i] <- subset$cropdmg[i] * 1000000
+  } else if (isTRUE(subset$cropdmgexp[i] == "B")) { subset$cropdamage[i] <- subset$cropdmg[i] * 1000000000
+  } else { subset$cropdamage[i] <- NA
+  }
+
+  # Multiplying the propdmg by multipliers associated with propdmgexp factors
+  if (isTRUE(subset$propdmgexp[i] == "K")) {subset$propdamage[i] <- subset$propdmg[i] * 1000
+  }else if (isTRUE(subset$propdmgexp[i] == "M")) {subset$propdamage[i] <- subset$propdmg[i] * 1000000
+  }else if (isTRUE(subset$propdmgexp[i] == "B")) {subset$propdamage[i] <- subset$propdmg[i] * 1000000000
+  } else {subset$propdamage[i] <- NA
+  }
+}
+```
+
+We apply the same weighing method used before to account for increased measurements over time. 
+```{r weighting damage}
+damage <- select(subset, evtype, cropdamage, propdamage, year) %>%
+  group_by(evtype, year) %>%
+  summarise(cropdamage = sum(cropdamage), propdamage = sum(propdamage))
+
+weightedCrop <- select(damage, -propdamage) %>%
+  spread(evtype, cropdamage)
+weightedCrop[,2:length(weightedCrop)] <- apply(weightedCrop[,2:length(weightedCrop)], 2, function(x) x*weights$weighting)
+weightedCrop <- gather(weightedCrop, evtype, cropdamage, -year)
+
+weightedProp <- select(damage, -cropdamage) %>%
+  spread(evtype, propdamage)
+weightedProp[,2:length(weightedProp)] <- apply(weightedProp[,2:length(weightedProp)], 2, function(x) x*weights$weighting)
+weightedProp <- gather(weightedProp, evtype, propdamage, -year)
+
+weightedDam <- weightedCrop
+weightedDam$propdamage <- weightedProp$propdamage
+```
+
+
+Only the total damage was plotted; because of the very high correlation (calculated below) between property damage and crop damage these two graphs look almost identical besides property damage being ~10x greater than crop damage. 
+```{r plotting damage, fig.width=80, fig.align='center', fig.width=10}
+# Summarising fatalities and injuries by event type
+# Then gathering into tall format for easy faceting
+weightedDam <- group_by(weightedDam, evtype) %>%
+  summarise(cropdamage = sum(cropdamage, na.rm=T), propdamage = sum(propdamage, na.rm=T)) %>%
+  mutate(totaldamage = cropdamage + propdamage)
+
+# Showing the very high correlation between crop damage and propdamage
+cor(weightedDam$cropdamage, weightedDam$propdamage)
+
+# Plot injuries and fatalities
+ggplot(weightedDam, aes(evtype, totaldamage)) +
+         geom_point() +
+  labs(list(title = "Comparing property and crop damage of different severe weather events", x= "Severe weather event type", y="Damage ($)")) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = -0.1))
+```
+
+Here we can see that tornados are  a much smaller contributor to damage than they were to population health, hail is by far the biggest source of damage to property and crops, over twice the damage of the next higheset severe weather event. Winds and floods are also signifficant causes of damage while tornadoes continue to be a reasonable source of damage. 
+
+, strong winds and flash floods cause 
